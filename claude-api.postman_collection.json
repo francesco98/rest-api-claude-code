@@ -1,0 +1,552 @@
+{
+  "info": {
+    "name": "Claude Code API",
+    "description": "Requests for the HTTP adapter in front of Claude Code (server.mjs).\n\nSet the collection variables `base_url` and `api_token` first. `session_id` and `file_url` are filled in automatically from the responses.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{api_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://claude-api.example.com"
+    },
+    {
+      "key": "api_token",
+      "value": ""
+    },
+    {
+      "key": "session_id",
+      "value": ""
+    },
+    {
+      "key": "file_url",
+      "value": ""
+    },
+    {
+      "key": "agent",
+      "value": "triage"
+    },
+    {
+      "key": "conversation",
+      "value": "demo"
+    },
+    {
+      "key": "data_file",
+      "value": "MEMORY.md"
+    },
+    {
+      "key": "job_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Prompts",
+      "description": "Send a prompt and continue the dialogue. \"Ask\" stores the returned session id for \"Continue with session id\".",
+      "item": [
+        {
+          "name": "Ask",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.session_id) pm.collectionVariables.set('session_id', body.session_id);",
+                  "if (body.files && body.files.length) pm.collectionVariables.set('file_url', body.files[body.files.length - 1].url);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"List the files in the workspace and say what each one is for\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/ask"
+          }
+        },
+        {
+          "name": "Continue with session id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.session_id) pm.collectionVariables.set('session_id', body.session_id);",
+                  "if (body.files && body.files.length) pm.collectionVariables.set('file_url', body.files[body.files.length - 1].url);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Now make that shorter\",\n  \"session_id\": \"{{session_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/ask",
+            "description": "Continues the conversation of the last \"Ask\" request, using the `session_id` it returned."
+          }
+        },
+        {
+          "name": "Continue with conversation key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversation\": \"{{conversation}}\",\n  \"prompt\": \"Now make that shorter\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/ask",
+            "description": "Alternative to `session_id`: send the same key of your choice with every request of a dialogue and the server keeps the session."
+          }
+        },
+        {
+          "name": "Forget conversation key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/conversations/_/{{conversation}}",
+            "description": "`_` stands for \"no agent\"."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Files",
+      "description": "Upload documents with a prompt and download what Claude produced. \"Upload document\" stores the last file URL for \"Download file\".",
+      "item": [
+        {
+          "name": "Upload document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.session_id) pm.collectionVariables.set('session_id', body.session_id);",
+                  "if (body.files && body.files.length) pm.collectionVariables.set('file_url', body.files[body.files.length - 1].url);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "prompt",
+                  "value": "Improve the clarity and fix the grammar",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{base_url}}/ask"
+          }
+        },
+        {
+          "name": "Download file",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}{{file_url}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "description": "Asynchronous runs: submit a request, get an id at once, read the result later or receive it on a webhook. \"Submit job\" stores the id for the other requests.",
+      "item": [
+        {
+          "name": "Submit job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"List the files in the workspace and say what each one is for\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/jobs",
+            "description": "Same body as Ask. Add \"callback_url\" (and optionally \"callback_headers\") to have the finished job sent to a webhook."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.id) pm.collectionVariables.set('job_id', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit job with agent and file",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.id) pm.collectionVariables.set('job_id', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "agent",
+                  "value": "{{agent}}",
+                  "type": "text"
+                },
+                {
+                  "key": "output_schema",
+                  "value": "ticket",
+                  "type": "text"
+                },
+                {
+                  "key": "prompt",
+                  "value": "Classify the attached message.",
+                  "type": "text"
+                },
+                {
+                  "key": "callback_url",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Optional: where to send the finished job"
+                },
+                {
+                  "key": "callback_headers",
+                  "value": "{\"X-Token\":\"abc\"}",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Optional: headers for the callback, as JSON text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{base_url}}/jobs",
+            "description": "A job takes the same form as Upload document, with the same optional fields as Ask. Pick a file for the `file` field before sending."
+          }
+        },
+        {
+          "name": "Get job",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/jobs/{{job_id}}",
+            "description": "Status of the job; once it has finished, `response` holds what Ask would have returned."
+          }
+        },
+        {
+          "name": "List jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/jobs",
+            "description": "Recent jobs without their responses. Add ?status=running to filter."
+          }
+        },
+        {
+          "name": "Cancel or remove job",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/jobs/{{job_id}}",
+            "description": "Cancels a queued or running job, or removes a finished one."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "description": "Run a named agent. Set the `agent` collection variable to choose which one (`name`, or `source/name` for an agent from a source).",
+      "item": [
+        {
+          "name": "List agents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/agents",
+            "description": "Agents the `agent` field can name, with their schema names."
+          }
+        },
+        {
+          "name": "Ask an agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agent\": \"{{agent}}\",\n  \"output_schema\": \"ticket\",\n  \"prompt\": \"I was charged twice for my subscription, please refund the second payment.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/ask",
+            "description": "Runs the agent named in the `agent` variable. `output` holds the answer validated against the schema `ticket` from that agent's schemas/ folder."
+          }
+        },
+        {
+          "name": "Agent conversation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agent\": \"{{agent}}\",\n  \"conversation\": \"{{conversation}}\",\n  \"prompt\": \"Correction: refund requests are always high urgency.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/ask",
+            "description": "Send the same `conversation` key again to continue the dialogue. The server stores the session."
+          }
+        },
+        {
+          "name": "Forget agent conversation",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/conversations/{{agent}}/{{conversation}}",
+            "description": "Forgets the key, so the next request with it starts a new conversation."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agent data",
+      "description": "The private folder of the agent in the `agent` variable: its memory and personal settings. `data_file` names the file.",
+      "item": [
+        {
+          "name": "List agent data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/agents/{{agent}}/data",
+            "description": "Files in the agent's private folder."
+          }
+        },
+        {
+          "name": "Read agent data file",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/agents/{{agent}}/data/{{data_file}}",
+            "description": "What the agent has remembered."
+          }
+        },
+        {
+          "name": "Write agent data file",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/markdown"
+              }
+            ],
+            "url": "{{base_url}}/agents/{{agent}}/data/{{data_file}}",
+            "description": "The body is the file content. To send a file from disk, switch the body to \"binary\".",
+            "body": {
+              "mode": "raw",
+              "raw": "# Triage memory\n\n## Rules\n- Refund requests are always high urgency.\n"
+            }
+          }
+        },
+        {
+          "name": "Write agent secrets (.env)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{base_url}}/agents/{{agent}}/data/.env",
+            "description": "Variables for this agent's scripts and tools. Write-only: the file can be replaced or deleted, never read back. To send a file from disk, switch the body to \"binary\".",
+            "body": {
+              "mode": "raw",
+              "raw": "# KEY=VALUE lines, given only to this agent's process\nEXAMPLE_TOKEN=\n"
+            }
+          }
+        },
+        {
+          "name": "Delete agent data file",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/agents/{{agent}}/data/{{data_file}}",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agent sources",
+      "description": "Git repositories that agents are pulled from.",
+      "item": [
+        {
+          "name": "List agent sources",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/agents/sources",
+            "description": "The git repositories agents are pulled from, with commit, last sync and last error."
+          }
+        },
+        {
+          "name": "Set agent sources",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sources\": [\n    {\n      \"name\": \"mine\",\n      \"git\": \"https://github.com/you/your-agents\",\n      \"ref\": \"main\",\n      \"path\": \"agents\",\n      \"tokenEnv\": \"MY_AGENTS_TOKEN\",\n      \"trusted\": true\n    },\n    {\n      \"name\": \"community\",\n      \"git\": \"https://github.com/someone/agents\",\n      \"ref\": \"0000000000000000000000000000000000000000\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/agents/sources",
+            "description": "Replaces the whole list and fetches every source. A source without \"trusted\": true must pin \"ref\" to a full commit."
+          }
+        },
+        {
+          "name": "Sync agent sources",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/agents/sync",
+            "description": "Fetch all sources again. Send {\"source\": \"mine\"} to fetch one."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      }
+    }
+  ]
+}

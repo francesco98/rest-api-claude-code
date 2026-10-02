@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "category": { "type": "string", "enum": ["billing", "technical", "account", "sales", "other"] },
+    "urgency": { "type": "string", "enum": ["low", "normal", "high"] },
+    "summary": { "type": "string" },
+    "reason": { "type": "string" }
+  },
+  "required": ["category", "urgency", "summary", "reason"],
+  "additionalProperties": false
+}

@@ -1,0 +1,5 @@
+.env
+*.personal.json
+
+# Private agent files (personal criteria, secrets): uploaded to the server, never committed
+private/

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "n8n-toolbox": {
+      "type": "http",
+      "url": "${N8N_TOOLBOX_URL}",
+      "headers": { "Authorization": "Bearer ${N8N_TOOLBOX_TOKEN}" }
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }
+    }
+  }
+}

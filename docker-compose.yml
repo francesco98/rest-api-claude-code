@@ -1,0 +1,64 @@
+x-build: &build
+  context: .
+  args:
+    CLAUDE_CODE_VERSION: latest   # pin e.g. 2.1.0 for reproducible builds
+
+services:
+  # Interactive use: docker compose run --rm claude
+  claude:
+    profiles: ["cli"]                                # not started by `docker compose up`, so servers only deploy `api`
+    build: *build
+    image: claude-code:local
+    container_name: claude-code
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    environment:
+      # Pro/Max subscription token from `claude setup-token` (set it in .env)
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:?run 'claude setup-token' on the host and put the token in .env}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${PROJECT_DIR:-claude-workspace}:/workspace  # the code Claude works on (named volume unless PROJECT_DIR is a host path)
+      - claude-config:/home/node/.claude             # login, settings, history
+      - ~/.gitconfig:/home/node/.gitconfig:ro        # optional: your git identity
+
+  # HTTP API in front of `claude -p`: docker compose up -d api
+  api:
+    build: *build
+    image: claude-code:local
+    command: ["node", "/opt/claude-api/server.mjs"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    ports:
+      - "127.0.0.1:${API_PORT:-48271}:8080"         # localhost only: this endpoint runs an agent
+    env_file:
+      - path: .env                                 # also passes secrets that agents' .mcp.json files refer to as ${NAME}
+        required: false
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:?run 'claude setup-token' on the host and put the token in .env}
+      - API_TOKEN=${API_TOKEN:-}                     # required; the server exits if it is empty
+      # Old workspace files are deleted after 24h, unless PROJECT_DIR is a host folder (then never, by default)
+      - WORKSPACE_RETENTION_HOURS=${WORKSPACE_RETENTION_HOURS:-${PROJECT_DIR:+0}}
+      - CLAUDE_ALLOWED_TOOLS=${CLAUDE_ALLOWED_TOOLS:-Read,Edit,Write,Glob,Grep,Bash}
+      - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-2}
+      - JOB_TIMEOUT_SECONDS=${JOB_TIMEOUT_SECONDS:-3600}
+      - JOB_RETENTION_HOURS=${JOB_RETENTION_HOURS:-24}
+      - AGENTS_DIR=/agents-extra                     # searched before the agents built into the image
+      - DATA_DIR=/agent-data
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${PROJECT_DIR:-claude-workspace}:/workspace  # uploads land in /workspace/uploads/<job_id>/
+      - claude-config:/home/node/.claude
+      - claude-agent-data:/agent-data                # agents' private files, the conversation index, the sources list and their checkouts
+      - ${AGENTS_DIR:-claude-agents-extra}:/agents-extra:ro  # optional host folder with agents that are not in this repo
+
+volumes:
+  claude-config:
+  claude-workspace:
+  claude-agent-data:
+  claude-agents-extra:

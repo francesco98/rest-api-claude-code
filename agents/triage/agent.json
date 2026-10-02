@@ -1,0 +1,4 @@
+{
+  "description": "Sorts an incoming message into a category and urgency, and learns routing rules from corrections",
+  "allowedTools": "Read,Write,Edit,Glob,Grep"
+}
