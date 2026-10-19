@@ -28,10 +28,12 @@ services:
     image: claude-code:local
     command: ["node", "/opt/claude-api/server.mjs"]
     restart: unless-stopped
-    # Claude's Bash sandbox (bubblewrap) needs to create namespaces, which Docker's default seccomp profile forbids.
-    # Without this, Bash commands fail (they never run outside the sandbox).
+    # Claude's Bash sandbox (bubblewrap) needs to create namespaces and mounts, which Docker's default seccomp profile
+    # and, on hosts with AppArmor (Ubuntu, Debian), its docker-default profile forbid.
+    # Without these, Bash commands fail (they never run outside the sandbox).
     security_opt:
       - seccomp=unconfined
+      - apparmor=unconfined
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s
