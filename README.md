@@ -37,6 +37,18 @@ Both use a Claude Pro/Max subscription through a token from `claude setup-token`
    docker compose build
    ```
 
+6. **Linux hosts with Ubuntu 24.04 or later:** allow the Bash sandbox to create user namespaces (see [Isolation](#isolation)). Ubuntu forbids it by default, and every Bash command then fails with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. Check on the host:
+   ```bash
+   sysctl kernel.apparmor_restrict_unprivileged_userns    # 1: the step below is needed
+   docker compose exec api bwrap --unshare-user --unshare-net --dev-bind / / true && echo ok
+   ```
+   If it does not print `ok`, lift the restriction once, on the host:
+   ```bash
+   echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-bwrap-userns.conf
+   sudo sysctl --system
+   ```
+   This is how Ubuntu behaved before 24.04. Docker Desktop (macOS, Windows) needs nothing.
+
 ## Interactive use
 
 ```bash
