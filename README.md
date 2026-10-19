@@ -30,6 +30,7 @@ Both use a Claude Pro/Max subscription through a token from `claude setup-token`
    | `JOB_RETENTION_HOURS` | no | How long a finished job and its result are kept. Default `24` |
    | `WORKSPACE_RETENTION_HOURS` | no | Workspace files not modified for this many hours are deleted; `0` keeps them forever. Default `24` with the Docker volume, `0` when `PROJECT_DIR` is set |
    | `SANDBOX_ALLOWED_DOMAINS` | no | Hosts that Bash commands may reach, comma-separated (`github.com,*.npmjs.org`). Default: none. See [Isolation](#isolation) |
+   | `SANDBOX_LIBREOFFICE` | no | `false` keeps runs fully apart at the cost of LibreOffice, which then fails. Default `true`. See [Isolation](#isolation) |
 
 5. Build the image:
    ```bash
@@ -294,6 +295,9 @@ How it is enforced:
 
 - **File tools** (Read, Edit, Write, Glob, Grep) work only inside the run's folders.
 - **Bash** runs in Claude Code's sandbox (bubblewrap). The rest of `/workspace`, of `/agent-data` and Claude's config folder are hidden from it, and it can only write to the run's folders. The `api` service in `docker-compose.yml` runs with `security_opt: seccomp=unconfined`, which the sandbox needs to start. Without it, Bash commands fail; they never run outside the sandbox.
+- **Home and secrets are read-only:** a run cannot change its `HOME` or the agent's `.env`, because the next turn's Claude process, which runs outside the sandbox, reads them. Caches (pip, pnpm, corepack, uv) go to `XDG_CACHE_HOME` and `XDG_DATA_HOME`, which are writable. An agent's `.env` cannot set `LD_*`, `NODE_*`, `PYTHON*`, `XDG_*`, `BASH_ENV`, `ENV`, `TMPDIR`, `HOME` or `PATH`.
+- **Temporary files:** each run has a private `TMPDIR`, removed when it ends.
+- **LibreOffice** needs a writable `/tmp` and Unix sockets, and both are shared by all runs. With the default `SANDBOX_LIBREOFFICE=true`, a run could therefore see and talk to another run's LibreOffice while both are running. Set it to `false` to rule that out; conversions then go through the Python libraries and pandoc only.
 - **Network:** Bash can reach only the hosts in `SANDBOX_ALLOWED_DOMAINS`, plus, for a trusted agent, the ones in its `agent.json` (`allowedDomains`). Untrusted agents have no shell and no network.
 - **Secrets:** runs without an agent get none of the server's environment variables. Agents never get `API_TOKEN` or the tokens of agent sources; a trusted agent gets its own `.env` and the server's other variables (for its `.mcp.json`).
 - **Sessions** belong to the folder they were started in. A `session_id` sent with a different agent, or one that belongs to a conversation, gets `404`. Sessions started before this version cannot be continued.

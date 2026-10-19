@@ -13,6 +13,9 @@ export const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR ?? path.join(proc
 export const SANDBOX_NESTED = process.env.SANDBOX_NESTED !== 'false'
 // Hosts Bash may reach in every run but an untrusted agent's (comma-separated, `*.example.com` allowed); empty: none.
 // A trusted agent adds its own in agent.json (`allowedDomains`).
+// LibreOffice only runs in the sandbox with a writable /tmp (for its pipe) and Unix sockets. Both are shared by all
+// runs, so this weakens the isolation between them; set to false to keep it whole (LibreOffice then fails).
+export const SANDBOX_LIBREOFFICE = process.env.SANDBOX_LIBREOFFICE !== 'false'
 export const SANDBOX_ALLOWED_DOMAINS = (process.env.SANDBOX_ALLOWED_DOMAINS ?? '').split(',').map((d) => d.trim()).filter(Boolean)
 export const ALLOWED_TOOLS = process.env.CLAUDE_ALLOWED_TOOLS ?? 'Read,Edit,Write,Glob,Grep,Bash'
 export const TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_SECONDS ?? 600) * 1000

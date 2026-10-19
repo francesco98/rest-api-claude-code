@@ -23,6 +23,11 @@ RUN python3 -m venv /opt/pytools \
   python-docx openpyxl python-pptx pypdf pdfplumber pymupdf reportlab pyyaml
 ENV PATH=/opt/pytools/bin:$PATH
 
+# LibreOffice keeps its profile in the run's temporary folder: the API makes HOME read-only inside the sandbox
+RUN for cmd in soffice libreoffice; do \
+  printf '#!/bin/sh\nexec /usr/bin/%s "-env:UserInstallation=file://${TMPDIR:-/tmp}/libreoffice-profile" "$@"\n' "$cmd" \
+  > /usr/local/bin/$cmd && chmod 755 /usr/local/bin/$cmd; done
+
 # Global npm installs go to a dir the non-root user owns (so in-app auto-update works)
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin

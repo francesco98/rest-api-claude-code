@@ -6,12 +6,13 @@
 //   - Bash runs in Claude Code's sandbox (bubblewrap), which cannot read the rest of the workspace, other agents' data
 //     or Claude's own config and transcripts, and can only write to the run's folders.
 import { spawn } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { isFile, readAgentEnv, readInstructions } from './agents.mjs'
+import { readAgentEnv, readInstructions } from './agents.mjs'
 import {
-  ALLOWED_TOOLS, CLAUDE_BIN, CLAUDE_CONFIG_DIR, DATA_DIR, SANDBOX_ALLOWED_DOMAINS, SANDBOX_NESTED, TIMEOUT_MS, UNTRUSTED_TOOLS,
-  WORKSPACE,
+  ALLOWED_TOOLS, CLAUDE_BIN, CLAUDE_CONFIG_DIR, DATA_DIR, SANDBOX_ALLOWED_DOMAINS, SANDBOX_LIBREOFFICE, SANDBOX_NESTED,
+  TIMEOUT_MS, UNTRUSTED_TOOLS, WORKSPACE,
 } from './config.mjs'
 import { contextPrefix } from './context.mjs'
 import { HttpError } from './http.mjs'
@@ -47,13 +48,19 @@ const FILE_TOOLS = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep'
 const scopeAllowedTools = (list) =>
   list.split(',').map((t) => t.trim()).filter((t) => t && !FILE_TOOLS.has(t)).join(',')
 
-// The per-run settings. `readable` are the folders the sandbox lets Bash read inside the otherwise hidden areas;
-// `domains` are the only hosts Bash can reach (none when empty).
-function runSettings({ readable, readOnly = [], domains = [] }) {
+// Each run's temporary files (Claude's own, the sandbox's proxy sockets, tools' TMPDIR) go to a folder of its own
+// under TMP_ROOT, which the other runs cannot see. The path is kept short: Unix socket paths are limited to 108 bytes.
+const TMP_ROOT = '/tmp/claude-runs'
+
+// The per-run settings.
+//   readable   folders the sandbox lets Bash read inside the otherwise hidden areas
+//   readOnly   files and folders that Bash and the file tools may read but not change
+//   domains    the only hosts Bash can reach (none when empty)
+function runSettings({ readable, readOnly = [], domains = [], tmp }) {
   return JSON.stringify({
     permissions: {
       blockReadsOutsideWorkingDirectories: true,
-      deny: readOnly.map((dir) => `Edit(/${dir}/**)`),
+      deny: readOnly.flatMap((p) => [`Edit(/${p})`, `Edit(/${p}/**)`]),
     },
     sandbox: {
       enabled: true,
@@ -62,13 +69,52 @@ function runSettings({ readable, readOnly = [], domains = [] }) {
       allowUnsandboxedCommands: false,
       enableWeakerNestedSandbox: SANDBOX_NESTED,
       filesystem: {
-        denyRead: [WORKSPACE, DATA_DIR, CLAUDE_CONFIG_DIR],
-        allowRead: readable,
+        denyRead: [WORKSPACE, DATA_DIR, CLAUDE_CONFIG_DIR, TMP_ROOT],
+        allowRead: [...readable, tmp],
+        // LibreOffice puts its pipe in /tmp, whatever TMPDIR says
+        allowWrite: [tmp, ...(SANDBOX_LIBREOFFICE ? ['/tmp'] : [])],
         denyWrite: readOnly,
       },
-      network: { allowedDomains: domains },
+      // LibreOffice talks to its own process over a Unix socket
+      network: { allowedDomains: domains, ...(SANDBOX_LIBREOFFICE && { allowAllUnixSockets: true }) },
     },
   })
+}
+
+// Where a run keeps the files that tools write in the home folder. HOME itself is read-only for the run: a shell
+// start-up file or a git config written there would be read on the next turn by processes outside the sandbox.
+// Caches and tool data (pip, pnpm, corepack, uv) go to writable folders next to it instead.
+async function homeFor(base) {
+  const home = path.join(base, '.home')
+  const xdg = {
+    XDG_CACHE_HOME: path.join(base, '.cache'),
+    XDG_DATA_HOME: path.join(base, '.local', 'share'),
+    XDG_STATE_HOME: path.join(base, '.local', 'state'),
+  }
+  for (const dir of [home, ...Object.values(xdg)]) await mkdir(dir, { recursive: true })
+  return { home, env: { HOME: home, ...xdg } }
+}
+
+// The run's private temporary folder; runClaude removes it when the run ends.
+async function tmpFor() {
+  const tmp = path.join(TMP_ROOT, randomBytes(6).toString('hex'))
+  await mkdir(tmp, { recursive: true, mode: 0o700 })
+  return { tmp, env: { TMPDIR: tmp, CLAUDE_CODE_TMPDIR: tmp } }
+}
+
+// The agent's .mcp.json, or null. A killed run can leave an empty one behind (the sandbox's placeholder for a file it
+// protects), which Claude Code would refuse, failing every later turn.
+async function mcpConfigOf(agent) {
+  const file = path.join(agent.dir, '.mcp.json')
+  const text = await readFile(file, 'utf8').catch(() => null)
+  if (text == null) return null
+  try {
+    JSON.parse(text)
+    return file
+  } catch {
+    console.error(`agent "${agent.name}": ignoring ${file}, which is ${text.trim() ? 'not valid JSON' : 'empty'}`)
+    return null
+  }
 }
 
 const memoryNote = (agent) =>
@@ -89,14 +135,17 @@ const ISOLATED = ['--setting-sources', 'user', '--strict-mcp-config']
 
 // A run without an agent: its context folder is its working directory and the only folder it has.
 async function plainRun(contextDir) {
-  const home = path.join(contextDir, '.home')
-  await mkdir(home, { recursive: true })
+  const home = await homeFor(contextDir)
+  const tmp = await tmpFor()
   return {
     cwd: contextDir,
-    env: { ...safeEnv(), HOME: home },
+    tmp: tmp.tmp,
+    env: { ...safeEnv(), ...home.env, ...tmp.env },
     args: [
       '--allowedTools', scopeAllowedTools(ALLOWED_TOOLS), '--permission-mode', 'acceptEdits', ...ISOLATED,
-      '--settings', runSettings({ readable: [contextDir], domains: SANDBOX_ALLOWED_DOMAINS }),
+      '--settings', runSettings({
+        readable: [contextDir], readOnly: [home.home], domains: SANDBOX_ALLOWED_DOMAINS, tmp: tmp.tmp,
+      }),
     ],
     note: ` ${filesNote(contextDir)}`,
   }
@@ -105,9 +154,12 @@ async function plainRun(contextDir) {
 // How one agent runs: {cwd, env, args, note}. There are three cases.
 async function agentRun(agent, contextDir) {
   await mkdir(agent.dataDir, { recursive: true })
-  // tools' caches and config (npm, pip, corepack, git) go to the agent's own folder, which persists between requests
-  const home = path.join(agent.dataDir, '.home')
-  await mkdir(home, { recursive: true })
+  // tools' caches go to the agent's own folder, which persists between requests
+  const home = await homeFor(agent.dataDir)
+  const tmp = await tmpFor()
+  // the agent's secrets and home are read by the next turn's Claude process, outside the sandbox: only the API
+  // (PUT /agents/<agent>/data/.env) may change them
+  const protectedFiles = [path.join(agent.dataDir, '.env'), home.home]
   const dirs = [contextDir, agent.dataDir]
   const readable = [...dirs, ...(agent.dir ? [agent.dir] : [])]
   const domains = [...SANDBOX_ALLOWED_DOMAINS, ...(agent.allowedDomains ?? [])]
@@ -120,7 +172,8 @@ async function agentRun(agent, contextDir) {
   if (agent.trusted && agent.tools) trustedArgs.push('--tools', agent.tools)
   // where the agent's scripts find its folders, plus the secrets from its own .env
   const folders = {
-    HOME: home,
+    ...home.env,
+    ...tmp.env,
     AGENT_DATA_DIR: agent.dataDir,
     AGENT_WORKSPACE: contextDir,
     // the context folder as /files/<path> names it, for scripts that print download paths
@@ -131,12 +184,13 @@ async function agentRun(agent, contextDir) {
   // 1. A folder agent from a trusted place runs inside its folder, so Claude Code loads its CLAUDE.md, skills,
   //    settings and tools itself.
   if (agent.trusted && agent.format === 'folder') {
-    const mcpConfig = path.join(agent.dir, '.mcp.json')
-    if (await isFile(mcpConfig)) trustedArgs.push('--mcp-config', mcpConfig, '--strict-mcp-config')
+    const mcpConfig = await mcpConfigOf(agent)
+    if (mcpConfig) trustedArgs.push('--mcp-config', mcpConfig, '--strict-mcp-config')
     return {
       cwd: agent.dir,
+      tmp: tmp.tmp,
       env,
-      args: [...trustedArgs, '--settings', runSettings({ readable, domains })],
+      args: [...trustedArgs, '--settings', runSettings({ readable, readOnly: protectedFiles, domains, tmp: tmp.tmp })],
       note: ` You are running as the agent "${agent.name}"; your instructions are the CLAUDE.md in the current directory. ${filesNote(contextDir)} ${memoryNote(agent)}`,
     }
   }
@@ -152,8 +206,12 @@ async function agentRun(agent, contextDir) {
   if (agent.trusted) {
     return {
       cwd,
+      tmp: tmp.tmp,
       env,
-      args: [...trustedArgs, ...ISOLATED, '--settings', runSettings({ readable, domains })],
+      args: [
+        ...trustedArgs, ...ISOLATED,
+        '--settings', runSettings({ readable, readOnly: protectedFiles, domains, tmp: tmp.tmp }),
+      ],
       note: ` You are running as the agent "${agent.name}". ${filesNote(contextDir)} ${memoryNote(agent)}${await instructionsNote(agent)}`,
     }
   }
@@ -163,21 +221,25 @@ async function agentRun(agent, contextDir) {
   //    - no tool is pre-approved; "acceptEdits" lets it read and write inside its own folders and refuses the rest;
   //    - its own folder (reference files, schemas) is readable but not writable;
   //    - the process gets neither the secrets in the server's environment nor a .env of its own.
-  const readOnly = agent.dir ? [agent.dir] : []
-  const untrustedDirs = [...dirs, ...readOnly]
+  const ownFiles = agent.dir ? [agent.dir] : []
+  const untrustedDirs = [...dirs, ...ownFiles]
   return {
     cwd,
+    tmp: tmp.tmp,
     env: { ...safeEnv(), ...folders },
     args: [
       '--tools', UNTRUSTED_TOOLS, '--permission-mode', 'acceptEdits', '--add-dir', ...untrustedDirs, ...ISOLATED,
-      '--settings', runSettings({ readable, readOnly }),
+      '--settings', runSettings({ readable, readOnly: [...ownFiles, ...protectedFiles], tmp: tmp.tmp }),
     ],
     note:
       ` You are running as the agent "${agent.name}". You can only read and write inside these folders: ${dirs.join(', ')}` +
-      `${readOnly.length ? `, and read your own files in ${readOnly[0]}` : ''}. ` +
+      `${ownFiles.length ? `, and read your own files in ${ownFiles[0]}` : ''}. ` +
       `Put files meant for the caller in ${contextDir}. ${memoryNote(agent)}${await instructionsNote(agent)}`,
   }
 }
+
+// Temporary folders of runs that a previous server process did not live to remove.
+export const clearRunTmp = () => rm(TMP_ROOT, { recursive: true, force: true })
 
 // Claude processes that are running now, so they can be stopped when the server stops.
 const children = new Set()
@@ -210,6 +272,7 @@ export async function runClaude(prompt, { session = {}, agent, schema, contextDi
     if (signal?.aborted) abort()
     else signal?.addEventListener('abort', abort, { once: true })
     const done = () => {
+      rm(run.tmp, { recursive: true, force: true }).catch(() => {})
       children.delete(child)
       clearTimeout(timer)
       signal?.removeEventListener('abort', abort)

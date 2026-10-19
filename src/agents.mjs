@@ -143,8 +143,10 @@ export async function listAgents() {
   return list
 }
 
-// Names an agent's .env may not set: they would break the server's own process or its login.
-const RESERVED_ENV = /^(PATH|HOME|USER|SHELL|API_TOKEN|NODE_OPTIONS|CLAUDE_\w*|ANTHROPIC_\w*|AGENT_\w*)$/i
+// Names an agent's .env may not set: they would break the server's own process or its login, or make the Claude
+// process (which runs outside the sandbox) or the MCP servers it starts load code of the agent's choosing.
+const RESERVED_ENV =
+  /^(PATH|HOME|USER|SHELL|TMPDIR|API_TOKEN|BASH_ENV|ENV|LD_\w*|NODE_\w*|PYTHON\w*|XDG_\w*|CLAUDE_\w*|ANTHROPIC_\w*|AGENT_\w*)$/i
 
 // Variables from the agent's private `.env` (KEY=VALUE lines, # comments, optional quotes). They are given to that
 // agent's Claude process only, so its scripts and .mcp.json can use secrets that no other agent sees.

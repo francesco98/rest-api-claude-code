@@ -65,7 +65,7 @@ curl -X PUT http://localhost:48271/agents/my-agent/data/.env \
 - Names the server itself depends on (`PATH`, `HOME`, `API_TOKEN`, `CLAUDE_*`, `ANTHROPIC_*`, `AGENT_*`) are ignored.
 - Agents from untrusted sources do not get one.
 
-Every agent's process also gets `AGENT_DATA_DIR` (its private folder), `AGENT_WORKSPACE` (the folder of the current conversation or session, the only part of the workspace it can see) and `AGENT_FILES_PREFIX` (that folder's path relative to the workspace, to print `/files/<path>` links), so scripts need no fixed paths. Files the agent should keep across conversations, such as a clone of a repository, belong in `AGENT_DATA_DIR`. Shell commands can only reach the hosts listed in `allowedDomains`.
+Every agent's process also gets `AGENT_DATA_DIR` (its private folder), `AGENT_WORKSPACE` (the folder of the current conversation or session, the only part of the workspace it can see) and `AGENT_FILES_PREFIX` (that folder's path relative to the workspace, to print `/files/<path>` links), so scripts need no fixed paths. Files the agent should keep across conversations, such as a clone of a repository, belong in `AGENT_DATA_DIR`. Its `.env` and `HOME` are read-only during a run; tools' caches go to `XDG_CACHE_HOME` and `XDG_DATA_HOME`, so write any other config into the project (for example `git config` without `--global`). Shell commands can only reach the hosts listed in `allowedDomains`.
 
 `data.example/` shows what an agent's folder looks like.
 

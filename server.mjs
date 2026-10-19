@@ -21,7 +21,7 @@ import { createServer } from 'node:http'
 import { handleAgentData } from './src/agent-data.mjs'
 import { listAgents, migrateDataDirs } from './src/agents.mjs'
 import { handleAsk } from './src/ask.mjs'
-import { stopRunningClaude } from './src/claude.mjs'
+import { clearRunTmp, stopRunningClaude } from './src/claude.mjs'
 import { API_TOKEN, PORT, WORKSPACE } from './src/config.mjs'
 import { handleForgetConversation } from './src/conversations.mjs'
 import { HttpError, authorized, send } from './src/http.mjs'
@@ -35,6 +35,7 @@ if (!API_TOKEN) {
 }
 
 startCleanup()
+await clearRunTmp()
 await migrateDataDirs()
 await startJobs()
 // in the background: built-in agents are served straight away, sources as soon as they are fetched

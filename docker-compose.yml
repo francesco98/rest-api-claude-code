@@ -57,6 +57,7 @@ services:
       - DATA_DIR=/agent-data
       - TZ=${TZ:-UTC}
       - SANDBOX_ALLOWED_DOMAINS=${SANDBOX_ALLOWED_DOMAINS:-}  # hosts Bash may reach; agents add theirs in agent.json
+      - SANDBOX_LIBREOFFICE=${SANDBOX_LIBREOFFICE:-true}       # false: runs fully apart, but no LibreOffice
     volumes:
       - ${PROJECT_DIR:-claude-workspace}:/workspace  # one folder per conversation/session, see "Isolation" in the README
       - claude-config:/home/node/.claude
