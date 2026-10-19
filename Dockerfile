@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python libraries for editing office files and PDFs, in a venv that is first on PATH
 RUN python3 -m venv /opt/pytools \
   && /opt/pytools/bin/pip install --no-cache-dir \
-  python-docx openpyxl python-pptx pypdf pdfplumber pymupdf reportlab
+  python-docx openpyxl python-pptx pypdf pdfplumber pymupdf reportlab pyyaml
 ENV PATH=/opt/pytools/bin:$PATH
 
 # Global npm installs go to a dir the non-root user owns (so in-app auto-update works)

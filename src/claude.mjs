@@ -22,7 +22,7 @@ const SYSTEM_HINT =
   'Document tools installed in this environment: pandoc (PDF output via --pdf-engine=weasyprint), ' +
   'LibreOffice headless (`soffice --headless --convert-to pdf|docx|xlsx|pptx <file>`), ' +
   'poppler-utils (pdftotext, pdftoppm), qpdf, ghostscript, ocrmypdf, tesseract (eng, ita), imagemagick, zip/unzip, ' +
-  'and python3 with python-docx, openpyxl, python-pptx, pypdf, pdfplumber, pymupdf and reportlab. ' +
+  'and python3 with python-docx, openpyxl, python-pptx, pypdf, pdfplumber, pymupdf, reportlab and pyyaml. ' +
   'When asked to change a document, deliver it in the same format it was provided in. ' +
   'For .docx/.xlsx/.pptx, edit the file with the Python libraries so formatting is preserved; do not rebuild it from plain text. ' +
   'A PDF has no editable source: produce a new PDF with the revised content and say that the layout was regenerated.'
