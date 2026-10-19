@@ -49,8 +49,9 @@ function agentRecord(source, name, fields) {
   }
 }
 
-// Folder agent. Optional agent.json next to CLAUDE.md: {description, tools, allowedTools, model}.
-// `tools` limits which built-in tools exist in the session; `allowedTools` says which run without asking.
+// Folder agent. Optional agent.json next to CLAUDE.md: {description, tools, allowedTools, allowedDomains, model}.
+// `tools` limits which built-in tools exist in the session; `allowedTools` says which run without asking;
+// `allowedDomains` are the hosts its Bash commands may reach (trusted agents only).
 async function readFolderAgent(dir, source) {
   const name = path.basename(dir)
   const settings = await readFile(path.join(dir, 'agent.json'), 'utf8').then(JSON.parse, (err) => {
@@ -63,6 +64,7 @@ async function readFolderAgent(dir, source) {
     description: settings.description ?? '',
     tools: toolList(settings.tools),
     allowedTools: toolList(settings.allowedTools),
+    allowedDomains: toolList(settings.allowedDomains)?.split(',').map((d) => d.trim()).filter(Boolean) ?? [],
     model: settings.model,
   })
 }

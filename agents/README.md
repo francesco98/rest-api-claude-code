@@ -15,7 +15,7 @@ The server starts Claude Code inside that folder, so everything in it applies to
 | File | Required | Purpose |
 |---|---|---|
 | `CLAUDE.md` | yes | The agent's instructions: what it is for, how it decides, what it must not do. Its presence is what makes the folder an agent |
-| `agent.json` | no | `description` (shown by `GET /agents`), `tools` (the only built-in tools that exist for this agent), `allowedTools` (the tools that run without asking; replaces `CLAUDE_ALLOWED_TOOLS`), `model` |
+| `agent.json` | no | `description` (shown by `GET /agents`), `tools` (the only built-in tools that exist for this agent), `allowedTools` (the tools that run without asking; replaces `CLAUDE_ALLOWED_TOOLS`), `allowedDomains` (hosts its shell commands may reach, added to `SANDBOX_ALLOWED_DOMAINS`; trusted agents only), `model` |
 | `scripts/` or any other files | no | Whatever the instructions refer to: shell scripts for fixed procedures, reference texts |
 | `schemas/<name>.json` | no | JSON Schemas for structured answers. A request picks one with `"output_schema": "<name>"` |
 | `.mcp.json` | no | MCP servers the agent may use as tools. Only these are loaded |
@@ -65,7 +65,7 @@ curl -X PUT http://localhost:48271/agents/my-agent/data/.env \
 - Names the server itself depends on (`PATH`, `HOME`, `API_TOKEN`, `CLAUDE_*`, `ANTHROPIC_*`, `AGENT_*`) are ignored.
 - Agents from untrusted sources do not get one.
 
-Every agent's process also gets `AGENT_DATA_DIR` (its private folder) and `AGENT_WORKSPACE` (the workspace, whose files `/files` serves), so scripts need no fixed paths.
+Every agent's process also gets `AGENT_DATA_DIR` (its private folder), `AGENT_WORKSPACE` (the folder of the current conversation or session, the only part of the workspace it can see) and `AGENT_FILES_PREFIX` (that folder's path relative to the workspace, to print `/files/<path>` links), so scripts need no fixed paths. Files the agent should keep across conversations, such as a clone of a repository, belong in `AGENT_DATA_DIR`. Shell commands can only reach the hosts listed in `allowedDomains`.
 
 `data.example/` shows what an agent's folder looks like.
 
@@ -128,7 +128,7 @@ An agent from someone else's repository runs on your server with your Claude sub
 | Version | Any branch, tag or commit | A pinned commit only, so it cannot change without you |
 | What is used from the repository | Everything: instructions, `agent.json`, `.mcp.json`, skills, settings | The instructions only |
 | Tools | What the agent declares, or `CLAUDE_ALLOWED_TOOLS` | Only `UNTRUSTED_TOOLS` (default `Read,Glob,Grep,Write,Edit`): no shell, no network, no MCP |
-| Files it can reach | The workspace and its private folder | Its private folder, its own output folder `agent-files/<source>+<name>/` in the workspace, and the files uploaded with the request |
+| Files it can reach | The request's folder, its private folder and its own folder | The request's folder and its private folder; its own folder read-only |
 | Server environment (tool secrets) | Visible | Not passed on |
 
 Mark a source trusted only if you control it. Before adding a public source, read the agents you intend to use at the commit you pin.

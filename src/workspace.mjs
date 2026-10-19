@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { lstat, mkdir, readdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { RETENTION_MS, UPLOADS, WORKSPACE } from './config.mjs'
+import { RETENTION_MS, WORKSPACE } from './config.mjs'
 import { HttpError } from './http.mjs'
 
-// Saves a request's files to their own folder, uploads/<job_id>/. Returns {jobId, dir, saved: [paths]}.
-export async function saveUploads(files) {
+// Saves a request's files to their own folder, <context>/uploads/<job_id>/. Returns {jobId, dir, saved: [paths]}.
+export async function saveUploads(files, root) {
   const jobId = randomUUID()
-  const dir = path.join(UPLOADS, jobId)
+  const dir = path.join(root, 'uploads', jobId)
   await mkdir(dir, { recursive: true })
   const saved = []
   for (const file of files) {
@@ -24,8 +24,9 @@ export async function saveUploads(files) {
 const SKIP_DIRS = new Set(['node_modules'])
 const MAX_LISTED_FILES = 200
 
-// Workspace files written since `since` (ms): uploads plus anything Claude created or edited.
-export async function listChangedFiles(since) {
+// Files under `root` (the run's context folder) written since `since` (ms): uploads plus anything Claude created or
+// edited. Names stay relative to the workspace, as /files expects them.
+export async function listChangedFiles(since, root) {
   const found = []
   async function walk(dir) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -36,7 +37,7 @@ export async function listChangedFiles(since) {
       else if (entry.isFile() && (await stat(full)).mtimeMs >= since) found.push(full)
     }
   }
-  await walk(WORKSPACE)
+  await walk(root)
   return found.map((full) => {
     const rel = path.relative(WORKSPACE, full)
     return { name: rel, url: `/files/${rel.split(path.sep).map(encodeURIComponent).join('/')}` }

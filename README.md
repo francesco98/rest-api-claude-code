@@ -21,7 +21,7 @@ Both use a Claude Pro/Max subscription through a token from `claude setup-token`
    |---|---|---|
    | `CLAUDE_CODE_OAUTH_TOKEN` | yes | The token from step 2 |
    | `API_TOKEN` | for the API | Password callers must send. Generate with `openssl rand -hex 32` |
-   | `PROJECT_DIR` | no | Host folder Claude works in, mounted as `/workspace`. If unset, a Docker volume is used. On Linux the folder must be writable by uid 1000 |
+   | `PROJECT_DIR` | no | Host folder for the workspace, mounted as `/workspace`. Each conversation and session gets its own folder in it (see [Isolation](#isolation)). If unset, a Docker volume is used. On Linux the folder must be writable by uid 1000 |
    | `API_PORT` | no | Port on your machine. Default `48271` |
    | `CLAUDE_ALLOWED_TOOLS` | no | Tools Claude may use through the API. Default `Read,Edit,Write,Glob,Grep,Bash` |
    | `AGENTS_DIR` | no | Host folder with extra agents, added to the ones in [agents/](agents/). See [Agents](#agents) |
@@ -29,6 +29,7 @@ Both use a Claude Pro/Max subscription through a token from `claude setup-token`
    | `JOB_TIMEOUT_SECONDS` | no | How long one job may run. Default `3600` |
    | `JOB_RETENTION_HOURS` | no | How long a finished job and its result are kept. Default `24` |
    | `WORKSPACE_RETENTION_HOURS` | no | Workspace files not modified for this many hours are deleted; `0` keeps them forever. Default `24` with the Docker volume, `0` when `PROJECT_DIR` is set |
+   | `SANDBOX_ALLOWED_DOMAINS` | no | Hosts that Bash commands may reach, comma-separated (`github.com,*.npmjs.org`). Default: none. See [Isolation](#isolation) |
 
 5. Build the image:
    ```bash
@@ -65,7 +66,7 @@ export API_TOKEN=<the value from .env>
 curl http://localhost:48271/ask \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"prompt": "Summarise README.md in three bullet points"}'
+  -d '{"prompt": "Write a Python script that prints the first 20 primes"}'
 ```
 
 Response:
@@ -85,11 +86,11 @@ Response:
 
 `output`, `agent` and `conversation` are filled when the request uses the fields described under [Agents](#agents).
 
-Claude works in `/workspace`, so prompts can refer to any file in `PROJECT_DIR` by its relative path.
+Each request works in a folder of its own, `/workspace/sessions/<session_id>/`, and cannot see the files of other requests. Continuing the session, or using a `conversation`, keeps the same folder. See [Isolation](#isolation).
 
 ### Continue a conversation
 
-Send back the `session_id` from a previous response:
+Send back the `session_id` from a previous response, with the same `agent` (or none) as the request that started it:
 
 ```bash
 curl http://localhost:48271/ask \
@@ -110,7 +111,7 @@ curl http://localhost:48271/ask \
 - The first request with a key starts a conversation; later ones continue it.
 - A request for a key that is still being answered gets `409`.
 - If Claude's stored history for the key is gone, the conversation starts again and the response has `"conversation_restarted": true`.
-- `DELETE /conversations/_/<key>` forgets a key (`_` stands for "no agent"; otherwise use the agent's name).
+- `DELETE /conversations/_/<key>` forgets a key and deletes the conversation's files (`_` stands for "no agent"; otherwise use the agent's name).
 
 ### Upload a document
 
@@ -133,8 +134,8 @@ Response:
   "upload_id": "695cab8e-29e6-416a-b400-43526d1b8c2b",
   "files": [
     {
-      "name": "uploads/695cab8e-29e6-416a-b400-43526d1b8c2b/proposal.md",
-      "url": "/files/uploads/695cab8e-29e6-416a-b400-43526d1b8c2b/proposal.md"
+      "name": "sessions/5c1e…/uploads/695cab8e-29e6-416a-b400-43526d1b8c2b/proposal.md",
+      "url": "/files/sessions/5c1e…/uploads/695cab8e-29e6-416a-b400-43526d1b8c2b/proposal.md"
     }
   ]
 }
@@ -142,9 +143,9 @@ Response:
 
 What happens to the files:
 
-- Each upload request gets its own folder, `uploads/<upload_id>/`, inside `PROJECT_DIR`. (`job_id` in the response is the former name of `upload_id` and carries the same value.)
+- Each upload request gets its own folder, `uploads/<upload_id>/`, inside the request's folder. (`job_id` in the response is the former name of `upload_id` and carries the same value.)
 - Claude edits the uploaded files in place and puts any new files in the same folder.
-- `files` lists every workspace file that was uploaded, created or edited during the request, each with a download `url`. This also applies to plain prompts: if Claude creates `hello.py`, it is listed.
+- `files` lists every file in the request's folder that was uploaded, created or edited during the request, each with a download `url`. This also applies to plain prompts: if Claude creates `hello.py`, it is listed.
 - Hidden files and `node_modules` are left out, and the list is capped at 200 entries.
 - Your original is overwritten in that folder, so keep your own copy.
 
@@ -153,11 +154,11 @@ What happens to the files:
 Append a `url` from the `files` list to the server address:
 
 ```bash
-curl -O http://localhost:48271/files/uploads/<upload_id>/proposal.md \
+curl -O http://localhost:48271/files/sessions/<session_id>/uploads/<upload_id>/proposal.md \
   -H "Authorization: Bearer $API_TOKEN"
 ```
 
-Any file in the workspace can be downloaded this way by its relative path, for example `/files/hello.py`, except hidden files such as `.env` or anything under `.git`.
+Any file in the workspace can be downloaded this way by its path relative to `/workspace`, except hidden files such as `.env` or anything under `.git`.
 
 If `PROJECT_DIR` is a host folder, the same files are also there on disk.
 
@@ -169,7 +170,7 @@ If `PROJECT_DIR` is a host folder, the same files are also there on disk.
 curl http://localhost:48271/jobs \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"prompt": "Review every file in the workspace and write REVIEW.md", "callback_url": "https://example.com/hooks/claude"}'
+  -d '{"prompt": "Research the history of the Unix shell and write HISTORY.md", "callback_url": "https://example.com/hooks/claude"}'
 ```
 
 ```json
@@ -264,9 +265,40 @@ Three optional request fields, in JSON or as form fields:
 
 Each agent also has a private folder on the server for its memory and personal settings, which is not part of this repository. The agent fills it as it learns, and you can read and write its files with `/agents/<agent>/data`. `triage` is a working example.
 
-Agents can also come from other git repositories, your own or public collections: register them with `PUT /agents/sources` and call them as `source/name`. Agents from a source you have not marked as trusted are pinned to a commit and run with a restricted tool set and no access to the rest of the workspace.
+Agents can also come from other git repositories, your own or public collections: register them with `PUT /agents/sources` and call them as `source/name`. Agents from a source you have not marked as trusted are pinned to a commit and run with a restricted tool set, no shell and no network.
 
 [agents/README.md](agents/README.md) explains the folder layout, memory, tools, sources and trust, and how to add an agent.
+
+### Isolation
+
+Every run sees only its own files. The workspace is split into one folder per conversation or session:
+
+```
+/workspace/
+  sessions/<session_id>/                    a request without agent and conversation
+  conversations/<key>/                      a conversation without agent
+  agents/<agent>/sessions/<session_id>/     a request to an agent
+  agents/<agent>/conversations/<key>/       a conversation with an agent
+```
+
+`source/name` agents use `source+name` as the folder name. Uploads go to `uploads/<upload_id>/` inside the request's folder.
+
+| A run can reach | Without an agent | With an agent |
+|---|---|---|
+| Its own folder (above) | read and write | read and write |
+| The agent's folder (`CLAUDE.md`, scripts, schemas) | — | read |
+| The agent's private folder (`/agents/<agent>/data`: `.env`, memory, its clones and downloads) | — | read and write, shared by all of that agent's conversations |
+| Other conversations and sessions, other agents' files, Claude's own settings and transcripts | no | no |
+
+How it is enforced:
+
+- **File tools** (Read, Edit, Write, Glob, Grep) work only inside the run's folders.
+- **Bash** runs in Claude Code's sandbox (bubblewrap). The rest of `/workspace`, of `/agent-data` and Claude's config folder are hidden from it, and it can only write to the run's folders. The `api` service in `docker-compose.yml` runs with `security_opt: seccomp=unconfined`, which the sandbox needs to start. Without it, Bash commands fail; they never run outside the sandbox.
+- **Network:** Bash can reach only the hosts in `SANDBOX_ALLOWED_DOMAINS`, plus, for a trusted agent, the ones in its `agent.json` (`allowedDomains`). Untrusted agents have no shell and no network.
+- **Secrets:** runs without an agent get none of the server's environment variables. Agents never get `API_TOKEN` or the tokens of agent sources; a trusted agent gets its own `.env` and the server's other variables (for its `.mcp.json`).
+- **Sessions** belong to the folder they were started in. A `session_id` sent with a different agent, or one that belongs to a conversation, gets `404`. Sessions started before this version cannot be continued.
+
+The calling side is not split: anyone with `API_TOKEN` can download any file in the workspace and use any agent.
 
 ### Endpoints
 
@@ -294,7 +326,7 @@ Errors come back as `{"error": "…"}` with one of these status codes:
 | 400 | Missing `prompt`, malformed body, invalid file path, an invalid `agent`, `conversation` or `output_schema`, or an invalid sources list |
 | 401 | Missing or wrong `Authorization` header |
 | 403 | Reading an agent's `.env` |
-| 404 | Unknown path, file not found, or unknown agent, schema, conversation, source or job |
+| 404 | Unknown path, file not found, or unknown agent, schema, conversation, session, source or job |
 | 409 | The `conversation` is still answering an earlier request, or has a job waiting |
 | 413 | Request larger than the upload limit |
 | 502 | Claude Code exited without a usable answer; the message includes its output |
@@ -306,7 +338,7 @@ A `200` response can still have `"is_error": true` when Claude Code itself repor
 
 - **File types.** Text, Markdown, code, images, PDF, Word, Excel and PowerPoint files work. The image ships `pandoc`, LibreOffice, PDF and OCR tools, and Python libraries for office files, and Claude is told they are there.
 - **PDF edits.** A PDF has no editable source, so an "improved" PDF is a newly generated one: the text is revised but the original layout, fonts and logos are not preserved. Upload the Word file instead when you have it.
-- **Tools.** Through the API, Claude can read, search and edit files and run shell commands inside the container, which it needs for conversions. Every API caller therefore has shell access there. Remove `Bash` from `CLAUDE_ALLOWED_TOOLS` to forbid it; document conversion then stops working.
+- **Tools.** Through the API, Claude can read, search and edit files and run shell commands, which it needs for conversions. Shell commands run in a sandbox limited to the request's folder (see [Isolation](#isolation)). Remove `Bash` from `CLAUDE_ALLOWED_TOOLS` to forbid them; document conversion then stops working.
 - **Size and time.** Requests are capped at 25 MB (`MAX_UPLOAD_MB`). A blocking `/ask` call is stopped after 10 minutes (`CLAUDE_TIMEOUT_SECONDS`); an asynchronous job after one hour (`JOB_TIMEOUT_SECONDS`).
 - **Cleanup.** Every file in the workspace, uploaded or created by Claude, is deleted once it has not been modified for `WORKSPACE_RETENTION_HOURS` (24 by default). When `PROJECT_DIR` points at a host folder, cleanup is off unless you set the variable yourself, so a real project is never cleaned by accident. Download results before then; after that, links stop working and follow-up prompts can no longer see the file. The server checks at startup and every 15 minutes.
 - **Speed.** Every request starts a new Claude Code process, which adds a second or two.
@@ -316,7 +348,7 @@ A `200` response can still have `"is_error": true` when Claude Code itself repor
 
 - **Personal use only.** Anthropic allows subscription tokens only inside Claude Code and claude.ai. This server stays within that by running the real Claude Code CLI, but it is meant for your own scripts on your own machine, not as a service for other people or apps. For that, use an API key with pay-per-use billing.
 - **Usage counts.** Requests draw on your subscription allowance. A script that loops can use it up for hours, so check your usage page after the first few calls.
-- **Keep it local.** The port is bound to `127.0.0.1`. Do not expose it to a network: anyone with the `API_TOKEN` can make Claude read and change files in `PROJECT_DIR`.
+- **Keep it local.** The port is bound to `127.0.0.1`. Do not expose it to a network: anyone with the `API_TOKEN` can make Claude read and change files in the workspace and use every agent, with its secrets.
 - **Protect `.env`.** It holds a long-lived subscription token and the API password. Never commit it.
 
 ## Maintenance

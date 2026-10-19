@@ -2,9 +2,9 @@ FROM node:22-bookworm-slim
 
 ARG CLAUDE_CODE_VERSION=latest
 
-# Tools Claude Code commonly shells out to
+# Tools Claude Code commonly shells out to; bubblewrap and socat run the sandbox around every Bash command
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  git curl ca-certificates ripgrep jq less procps openssh-client \
+  git curl ca-certificates ripgrep jq less procps openssh-client bubblewrap socat \
   && rm -rf /var/lib/apt/lists/*
 
 # Document tooling: convert, read and generate Word/Excel/PowerPoint/PDF/images

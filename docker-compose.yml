@@ -28,6 +28,10 @@ services:
     image: claude-code:local
     command: ["node", "/opt/claude-api/server.mjs"]
     restart: unless-stopped
+    # Claude's Bash sandbox (bubblewrap) needs to create namespaces, which Docker's default seccomp profile forbids.
+    # Without this, Bash commands fail (they never run outside the sandbox).
+    security_opt:
+      - seccomp=unconfined
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s
@@ -52,8 +56,9 @@ services:
       - AGENTS_DIR=/agents-extra                     # searched before the agents built into the image
       - DATA_DIR=/agent-data
       - TZ=${TZ:-UTC}
+      - SANDBOX_ALLOWED_DOMAINS=${SANDBOX_ALLOWED_DOMAINS:-}  # hosts Bash may reach; agents add theirs in agent.json
     volumes:
-      - ${PROJECT_DIR:-claude-workspace}:/workspace  # uploads land in /workspace/uploads/<job_id>/
+      - ${PROJECT_DIR:-claude-workspace}:/workspace  # one folder per conversation/session, see "Isolation" in the README
       - claude-config:/home/node/.claude
       - claude-agent-data:/agent-data                # agents' private files, the conversation index, the sources list and their checkouts
       - ${AGENTS_DIR:-claude-agents-extra}:/agents-extra:ro  # optional host folder with agents that are not in this repo

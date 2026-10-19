@@ -1,9 +1,10 @@
 // Conversations: a caller-chosen key that stands for a Claude session, so callers don't have to store session ids.
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AGENT_NAME } from './agents.mjs'
 import { DATA_DIR } from './config.mjs'
+import { contextDir } from './context.mjs'
 import { HttpError, send } from './http.mjs'
 
 const CONVERSATIONS_FILE = path.join(DATA_DIR, 'conversations.json')
@@ -56,7 +57,7 @@ export async function runInConversation(agentName, key, run) {
 }
 
 export async function handleForgetConversation(res, agentName, key) {
-  if (!(agentName === '_' || AGENT_NAME.test(agentName)) || !CONVERSATION_KEY.test(key)) {
+  if (!(agentName === '_' || AGENT_NAME.test(agentName)) || !CONVERSATION_KEY.test(key) || /^\.+$/.test(key)) {
     throw new HttpError(400, 'invalid conversation path')
   }
   const index = await loadConversations()
@@ -64,5 +65,8 @@ export async function handleForgetConversation(res, agentName, key) {
   if (!(id in index)) throw new HttpError(404, 'conversation not found')
   delete index[id]
   await saveConversations()
+  // the conversation's files go with it
+  const agent = agentName === '_' ? null : { name: agentName }
+  await rm(contextDir({ agent, conversation: key }), { recursive: true, force: true })
   send(res, 200, { ok: true })
 }

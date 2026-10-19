@@ -5,6 +5,8 @@
 //   POST /jobs                    the same request, answered at once with a job id (see src/jobs.mjs)
 //   GET  /jobs, GET|DELETE /jobs/<id>   list, read, cancel or remove jobs
 //   GET  /files/<path>            download a workspace file (the `url` values returned by /ask)
+//
+// Each run sees only its own folder of the workspace, one per conversation or session (see src/context.mjs).
 //   GET  /agents                  list the agents that `agent` can name
 //   GET  /agents/sources          the git repositories agents are pulled from, with their sync status
 //   PUT  /agents/sources          replace that list {sources: [...]} and sync
